@@ -6,6 +6,7 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #fdf6e3; direction: rtl; overflow: hidden; }
@@ -161,6 +162,11 @@
         .server-status.online { background: #27ae60; color: white; }
         .server-status.offline { background: #e74c3c; color: white; }
         
+        /* DB status */
+        .db-status { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
+        .db-status.connected { background: #27ae60; color: white; }
+        .db-status.disconnected { background: #e74c3c; color: white; }
+        
         /* Media items list */
         .media-items-list {
             margin-top: 10px;
@@ -235,8 +241,15 @@
     <script type="text/babel">
         const { useState, useRef, useEffect } = React;
 
+        // 🔧 CONFIGURATION SUPABASE
+        const SUPABASE_URL = 'https://earbieeiscchmwipubwc.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhcmJpZWVpc2NjaG13aXB1YndjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MDQxMjMsImV4cCI6MjA4NTE4MDEyM30.a2q9CAFZzyToo76eFsSQKjNhVFGu3cxk0oat76_MuVU';
+        
+        // Initialiser Supabase
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
         // 🔧 CONFIGURATION SERVEUR
-        const SERVER_URL = '';
+        const SERVER_URL = '';  // Vide = utilise l'URL actuelle (Render)
 
         const TRAITES = [
             { fr: "Berakhot", hb: "ברכות", p: 64 }, { fr: "Chabbath", hb: "שבת", p: 157 },
@@ -262,25 +275,6 @@
 
         const COLORS = ["#81ecec", "#74b9ff", "#a29bfe", "#ffeaa7", "#fab1a0", "#55efc4"];
 
-        // Utilitaires localStorage
-        const saveToStorage = (key, value) => {
-            try {
-                localStorage.setItem(key, JSON.stringify(value));
-            } catch (e) {
-                console.error("Erreur sauvegarde:", e);
-                alert("⚠️ Erreur de sauvegarde");
-            }
-        };
-
-        const loadFromStorage = (key, defaultValue) => {
-            try {
-                const item = localStorage.getItem(key);
-                return item ? JSON.parse(item) : defaultValue;
-            } catch (e) {
-                return defaultValue;
-            }
-        };
-
         // 🔧 UPLOAD VERS LE SERVEUR
         const uploadFile = async (file, type) => {
             const formData = new FormData();
@@ -303,25 +297,19 @@
 
         function App() {
             // Chargement initial
-            const [nav, setNav] = useState(() => {
-                const saved = loadFromStorage('talmud_nav', null);
-                if (saved && saved.t) {
-                    const traite = TRAITES.find(t => t.fr === saved.t.fr);
-                    return { ...saved, t: traite || TRAITES[0] };
-                }
-                return { t: TRAITES[0], d: 2, a: "a" };
-            });
+            const [nav, setNav] = useState({ t: TRAITES[0], d: 2, a: "a" });
             
-            const [sidebarWidth, setSidebarWidth] = useState(() => loadFromStorage('sidebar_width', 340));
+            const [sidebarWidth, setSidebarWidth] = useState(340);
             const [isResizing, setIsResizing] = useState(false);
             const [isAdmin, setIsAdmin] = useState(false);
-            const [config, setConfig] = useState(() => loadFromStorage('talmud_config', {}));
+            const [config, setConfig] = useState({});
             const [activeZone, setActiveZone] = useState(null);
             const [tempEditZone, setTempEditZone] = useState(null);
             const [imageExists, setImageExists] = useState(true);
             const [loading, setLoading] = useState(false);
             const [loadingMessage, setLoadingMessage] = useState('');
             const [serverOnline, setServerOnline] = useState(false);
+            const [dbConnected, setDbConnected] = useState(false);
             
             const [drawing, setDrawing] = useState(false);
             const [startPos, setStartPos] = useState(null);
@@ -341,6 +329,78 @@
             
             const imagePath = `dafim/${nav.t.fr}_${nav.d}${nav.a}.jpg`;
 
+            // 🔧 LOAD CONFIG FROM SUPABASE
+            const loadConfigFromDB = async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('zones_config')
+                        .select('*');
+                    
+                    if (error) throw error;
+                    
+                    // Convertir en format config
+                    const newConfig = {};
+                    data.forEach(row => {
+                        newConfig[row.page_key] = row.config_data;
+                    });
+                    
+                    setConfig(newConfig);
+                    setDbConnected(true);
+                    console.log('✓ Configuration chargée depuis Supabase');
+                } catch (error) {
+                    console.error('Erreur chargement DB:', error);
+                    setDbConnected(false);
+                }
+            };
+
+            // 🔧 SAVE CONFIG TO SUPABASE
+            const saveConfigToDB = async (pageKey, zonesData) => {
+                try {
+                    // Vérifier si la page existe déjà
+                    const { data: existing } = await supabase
+                        .from('zones_config')
+                        .select('id')
+                        .eq('page_key', pageKey)
+                        .single();
+                    
+                    if (existing) {
+                        // Update
+                        const { error } = await supabase
+                            .from('zones_config')
+                            .update({ config_data: zonesData, updated_at: new Date().toISOString() })
+                            .eq('page_key', pageKey);
+                        
+                        if (error) throw error;
+                    } else {
+                        // Insert
+                        const { error } = await supabase
+                            .from('zones_config')
+                            .insert({ page_key: pageKey, config_data: zonesData });
+                        
+                        if (error) throw error;
+                    }
+                    
+                    console.log('✓ Sauvegardé dans Supabase:', pageKey);
+                } catch (error) {
+                    console.error('Erreur sauvegarde DB:', error);
+                }
+            };
+
+            // Charger la config au démarrage
+            useEffect(() => {
+                loadConfigFromDB();
+            }, []);
+
+            // Sauvegarder automatiquement quand config change
+            useEffect(() => {
+                if (Object.keys(config).length > 0) {
+                    // Sauvegarder chaque page modifiée
+                    Object.keys(config).forEach(key => {
+                        saveConfigToDB(key, config[key]);
+                    });
+                }
+            }, [config]);
+
             // 🔧 VÉRIFIER SI LE SERVEUR EST EN LIGNE
             useEffect(() => {
                 const checkServer = async () => {
@@ -356,7 +416,7 @@
                 return () => clearInterval(interval);
             }, []);
 
-            // 🔧 COMPTAGE DES ZONES UNIQUES (groupes liés = 1 zone)
+            // COMPTAGE DES ZONES UNIQUES
             const getUniqueZoneCount = () => {
                 const groups = new Set();
                 let standaloneCount = 0;
@@ -371,19 +431,6 @@
                 
                 return groups.size + standaloneCount;
             };
-
-            // Sauvegarde automatique
-            useEffect(() => {
-                saveToStorage('talmud_nav', nav);
-            }, [nav]);
-
-            useEffect(() => {
-                saveToStorage('talmud_config', config);
-            }, [config]);
-
-            useEffect(() => {
-                saveToStorage('sidebar_width', sidebarWidth);
-            }, [sidebarWidth]);
 
             useEffect(() => {
                 const img = new Image();
@@ -408,7 +455,6 @@
                 }
             };
 
-            // 🔧 RÉCUPÉRER LA ZONE PRINCIPALE d'un groupe lié
             const getMainZone = (zone) => {
                 if (!zone.linkedGroup) return zone;
                 const linkedZones = zones.filter(z => z.linkedGroup === zone.linkedGroup);
@@ -420,7 +466,7 @@
                 return zones.filter(z => z.linkedGroup === zone.linkedGroup);
             };
 
-            // 🔧 GESTION DU RESIZE DE LA SIDEBAR
+            // GESTION DU RESIZE DE LA SIDEBAR
             const handleResizeStart = (e) => {
                 e.preventDefault();
                 setIsResizing(true);
@@ -480,8 +526,8 @@
                         ...tempRect, 
                         color: COLORS[zones.length % COLORS.length],
                         audio: null,
-                        images: [], // Tableau d'images avec titres
-                        texts: [], // Tableau de textes avec titres
+                        images: [],
+                        texts: [],
                         linkedGroup: null
                     };
                     setConfig({...config, [pageKey]: [...zones, newZone]});
@@ -570,7 +616,7 @@
                 setResizing(null);
             };
 
-            // 🔧 LIAISON (zones deviennent UNE)
+            // LIAISON
             const handleLinkZone = () => {
                 if (zones.length < 2) return;
                 const newZones = [...zones];
@@ -581,7 +627,6 @@
                 last.linkedGroup = groupId;
                 if (!prev.linkedGroup) prev.linkedGroup = groupId;
                 
-                // Partager tous les médias
                 last.color = prev.color;
                 last.audio = prev.audio;
                 last.images = prev.images || [];
@@ -591,7 +636,7 @@
                 alert("✓ Zones liées !");
             };
 
-            // 🔧 DÉLIER
+            // DÉLIER
             const handleUnlinkZone = (zone) => {
                 const linkedZones = getLinkedZones(zone);
                 
@@ -616,7 +661,7 @@
                 setTempEditZone(null);
             };
 
-            // 🔧 CLIC sur zone
+            // CLIC sur zone
             const handleZoneClick = (z) => {
                 const mainZone = getMainZone(z);
                 
@@ -629,7 +674,7 @@
                 }
             };
 
-            // 🔧 AJOUT AUDIO
+            // AJOUT AUDIO
             const handleAddAudio = async () => {
                 if (!serverOnline) {
                     alert("❌ Serveur hors ligne !");
@@ -640,10 +685,12 @@
                 input.type = 'file';
                 input.accept = 'audio/*';
                 input.onchange = async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    
                     setLoading(true);
                     setLoadingMessage('Upload audio...');
                     try {
-                        const file = e.target.files[0];
                         const url = await uploadFile(file, 'audio');
                         setTempEditZone({...tempEditZone, audio: url});
                         alert('✓ Audio uploadé !');
@@ -656,7 +703,7 @@
                 input.click();
             };
 
-            // 🔧 AJOUT IMAGE (avec titre)
+            // AJOUT IMAGE (avec titre)
             const handleAddImage = async () => {
                 if (!serverOnline) {
                     alert("❌ Serveur hors ligne !");
@@ -689,7 +736,7 @@
                 input.click();
             };
 
-            // 🔧 AJOUT TEXTE (avec titre)
+            // AJOUT TEXTE (avec titre)
             const handleAddText = () => {
                 const title = prompt("Titre du texte:");
                 if (!title) return;
@@ -698,7 +745,7 @@
                 setTempEditZone({...tempEditZone, texts: newTexts});
             };
 
-            // 🔧 MODIFIER TITRE IMAGE
+            // MODIFIER TITRE IMAGE
             const handleUpdateImageTitle = (imageId, newTitle) => {
                 const newImages = tempEditZone.images.map(img => 
                     img.id === imageId ? {...img, title: newTitle} : img
@@ -706,7 +753,7 @@
                 setTempEditZone({...tempEditZone, images: newImages});
             };
 
-            // 🔧 MODIFIER TITRE TEXTE
+            // MODIFIER TITRE TEXTE
             const handleUpdateTextTitle = (textId, newTitle) => {
                 const newTexts = tempEditZone.texts.map(txt => 
                     txt.id === textId ? {...txt, title: newTitle} : txt
@@ -714,19 +761,19 @@
                 setTempEditZone({...tempEditZone, texts: newTexts});
             };
 
-            // 🔧 SUPPRIMER IMAGE
+            // SUPPRIMER IMAGE
             const handleRemoveImage = (imageId) => {
                 const newImages = tempEditZone.images.filter(img => img.id !== imageId);
                 setTempEditZone({...tempEditZone, images: newImages});
             };
 
-            // 🔧 SUPPRIMER TEXTE
+            // SUPPRIMER TEXTE
             const handleRemoveText = (textId) => {
                 const newTexts = tempEditZone.texts.filter(txt => txt.id !== textId);
                 setTempEditZone({...tempEditZone, texts: newTexts});
             };
 
-            // 🔧 MODIFIER TEXTE
+            // MODIFIER TEXTE
             const handleUpdateText = (textId, newContent) => {
                 const newTexts = tempEditZone.texts.map(txt => 
                     txt.id === textId ? {...txt, content: newContent} : txt
@@ -753,10 +800,10 @@
                 
                 setConfig({...config, [pageKey]: updatedZones});
                 setActiveZone(tempEditZone);
-                alert("✓ Modifications enregistrées !");
+                alert("✓ Modifications enregistrées et synchronisées !");
             };
 
-            // 🔧 AUTO-EXPORT toutes les 5 minutes
+            // AUTO-EXPORT toutes les 5 minutes
             useEffect(() => {
                 if (!isAdmin) return;
                 
@@ -776,13 +823,12 @@
                     console.log('✓ Sauvegarde automatique effectuée');
                 };
                 
-                // Premier export après 5 minutes
-                const timer = setInterval(autoExport, 5 * 60 * 1000); // 5 minutes
+                const timer = setInterval(autoExport, 5 * 60 * 1000);
                 
                 return () => clearInterval(timer);
             }, [isAdmin, config]);
 
-            // EXPORT manuel (si besoin)
+            // EXPORT manuel
             const handleExportJSON = () => {
                 const exportData = {
                     version: "2.0",
@@ -870,7 +916,10 @@
                         <h1>
                             Talmud Interactif
                             <span className={`server-status ${serverOnline ? 'online' : 'offline'}`}>
-                                {serverOnline ? '● Online' : '● Offline'}
+                                {serverOnline ? '● Serveur' : '● Offline'}
+                            </span>
+                            <span className={`db-status ${dbConnected ? 'connected' : 'disconnected'}`}>
+                                {dbConnected ? '● DB' : '● DB Offline'}
                             </span>
                         </h1>
                         <div className="nav-section">
@@ -1064,13 +1113,11 @@
                                         const imagesCount = z.images?.length || 0;
                                         const textsCount = z.texts?.length || 0;
                                         
-                                        // Vérifier si cette zone fait partie du groupe sélectionné
                                         const isSelected = activeZone && (
                                             activeZone.id === z.id || 
                                             (activeZone.linkedGroup && z.linkedGroup === activeZone.linkedGroup)
                                         );
                                         
-                                        // En mode utilisateur, masquer les bordures des zones liées pour un aspect unifié
                                         const zoneClasses = `zone-overlay ${isSelected ? 'selected' : ''} ${isAdmin && isLinked ? 'linked' : ''}`;
                                         const zoneStyle = {
                                             left: z.x, 
@@ -1078,7 +1125,6 @@
                                             width: z.w, 
                                             height: z.h, 
                                             background: z.color,
-                                            // En mode utilisateur, si zone liée : bordure transparente et opacité plus forte
                                             ...((!isAdmin && isLinked) ? {
                                                 border: 'none',
                                                 opacity: 0.5
