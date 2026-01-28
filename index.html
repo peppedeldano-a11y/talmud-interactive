@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Talmud Interactif - Multi-Médias</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #fdf6e3; direction: rtl; overflow: hidden; }
+        .app-container { display: flex; height: 100vh; }
+        
+        /* Barre latérale REDIMENSIONNABLE */
+        .sidebar { 
+            min-width: 280px;
+            max-width: 600px;
+            background: #2c3e50; 
+            color: white; 
+            padding: 20px; 
+            display: flex; 
+            flex-direction: column; 
+            border-left: 3px solid #e67e22; 
+            z-index: 10; 
+            overflow-y: auto; 
+            position: relative;
+        }
+        
+        /* Séparateur draggable */
+        .resize-divider {
+            width: 5px;
+            cursor: ew-resize;
+            background: #34495e;
+            position: relative;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+        .resize-divider:hover {
+            background: #e67e22;
+        }
+        .resize-divider::after {
+            content: '⋮';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: rgba(255,255,255,0.5);
+            font-size: 20px;
+        }
+        
+        .nav-section { flex-grow: 1; }
+        h1 { font-size: 20px; color: #e67e22; text-align: center; margin-bottom: 25px; }
+        
+        /* Contenu principal */
+        .viewer-container { flex: 1; display: flex; position: relative; padding-bottom: 110px; }
+        .media-panel { 
+            width: 450px; 
+            background: #fff; 
+            border-left: 1px solid #ddd; 
+            padding: 20px; 
+            overflow-y: auto; 
+            display: none; 
+        }
+        .media-panel.active { display: block; }
+        .daf-viewport { flex: 1; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        
+        /* Zones & Dessin */
+        .canvas-wrapper { position: relative; background: white; box-shadow: 0 0 25px rgba(0,0,0,0.2); align-self: flex-start; }
+        .zone-overlay { position: absolute; opacity: 0.35; cursor: pointer; border: 2px solid rgba(0,0,0,0.3); transition: 0.2s; }
+        .zone-overlay.selected { border: 3px solid #e67e22; opacity: 0.6; box-shadow: 0 0 15px #e67e22; }
+        .zone-overlay.linked { border-style: dashed; }
+        
+        /* Badge de compteur sur les zones */
+        .zone-badge {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .zone-badge-item {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        .zone-badge-num {
+            background: #e67e22;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 10px;
+        }
+        
+        /* Poignées de redimensionnement */
+        .resize-handle { position: absolute; width: 10px; height: 10px; background: white; border: 2px solid #e67e22; display: none; }
+        .zone-overlay.selected .resize-handle { display: block; }
+        .resize-handle.nw { top: -5px; left: -5px; cursor: nw-resize; }
+        .resize-handle.ne { top: -5px; right: -5px; cursor: ne-resize; }
+        .resize-handle.sw { bottom: -5px; left: -5px; cursor: sw-resize; }
+        .resize-handle.se { bottom: -5px; right: -5px; cursor: se-resize; }
+        
+        .delete-btn { position: absolute; left: -12px; top: -12px; background: #e74c3c; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 2px solid white; cursor: pointer; z-index: 5; }
+        .unlink-btn { position: absolute; right: -12px; top: -12px; background: #f39c12; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 10px; border: 2px solid white; cursor: pointer; z-index: 5; }
+
+        /* Lecteur Audio */
+        .audio-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 110px; background: #fff; border-top: 4px solid #e67e22; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 40px; direction: ltr; }
+        .play-btn { background: #e67e22; color: white; border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 20px; border: none; cursor: pointer; margin-bottom: 10px; transition: 0.3s; }
+        .play-btn:hover { background: #d35400; transform: scale(1.05); }
+        .progress-container { width: 100%; display: flex; align-items: center; gap: 15px; font-size: 12px; color: #666; }
+        .progress-bar { flex: 1; height: 6px; background: #ddd; border-radius: 3px; cursor: pointer; position: relative; }
+        .progress-fill { height: 100%; background: #e67e22; border-radius: 3px; transition: width 0.1s; }
+        
+        /* Inputs */
+        select, button, textarea, input[type="text"] { width: 100%; padding: 12px; border-radius: 6px; border: none; margin-top: 10px; font-size: 14px; box-sizing: border-box; }
+        label { font-size: 12px; color: #bdc3c7; display: block; margin-top: 15px; }
+        
+        .btn-admin-access { background: none; color: #5d6d7e; border: 1px solid #5d6d7e; margin-top: auto; font-size: 11px; }
+        .admin-box { background: #34495e; padding: 15px; border-radius: 8px; margin-top: 20px; max-height: 60vh; overflow-y: auto; }
+        
+        /* Zone counter */
+        .zone-counter { background: #e67e22; color: white; padding: 10px 15px; border-radius: 6px; text-align: center; font-weight: bold; margin-top: 10px; font-size: 16px; }
+        
+        /* Indicateurs de contenu avec COMPTEURS */
+        .content-indicators { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .indicator { padding: 8px 12px; border-radius: 4px; font-size: 13px; display: flex; align-items: center; gap: 6px; font-weight: bold; }
+        .indicator.has-content { background: #27ae60; color: white; }
+        .indicator.no-content { background: #555; color: #999; }
+        .indicator-count {
+            background: rgba(255,255,255,0.3);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            min-width: 20px;
+            text-align: center;
+        }
+        
+        .validate-btn { background: #27ae60 !important; color: white !important; margin-top: 15px; font-weight: bold; }
+        .validate-btn:hover { background: #229954 !important; }
+        
+        /* Status badge */
+        .status-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
+        .status-badge.available { background: #27ae60; color: white; }
+        .status-badge.missing { background: #e74c3c; color: white; }
+        
+        /* Error message */
+        .error-msg { background: #e74c3c; color: white; padding: 15px; border-radius: 6px; margin: 20px; text-align: center; }
+        
+        /* Loading indicator */
+        .loading-indicator { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: white; padding: 30px 50px; border-radius: 10px; z-index: 1000; text-align: center; }
+        .loading-indicator .spinner { font-size: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Server status */
+        .server-status { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
+        .server-status.online { background: #27ae60; color: white; }
+        .server-status.offline { background: #e74c3c; color: white; }
+        
+        /* Media items list */
+        .media-items-list {
+            margin-top: 10px;
+            background: #2c3e50;
+            padding: 10px;
+            border-radius: 6px;
+        }
+        .media-item {
+            background: #34495e;
+            padding: 10px;
+            margin: 8px 0;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .media-item-title {
+            font-size: 12px;
+            color: #ecf0f1;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .media-item-remove {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        
+        /* Panel médias amélioré */
+        .media-section {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        .media-section:last-child {
+            border-bottom: none;
+        }
+        .media-section h4 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .media-content-item {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-right: 4px solid #e67e22;
+            border-radius: 4px;
+        }
+        .media-content-title {
+            font-weight: bold;
+            color: #e67e22;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .media-content-text {
+            color: #2c3e50;
+            line-height: 1.6;
+            text-align: justify;
+            white-space: pre-wrap;
+            direction: ltr;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // 🔧 CONFIGURATION SERVEUR
+        const SERVER_URL = '';
+
+        const TRAITES = [
+            { fr: "Berakhot", hb: "ברכות", p: 64 }, { fr: "Chabbath", hb: "שבת", p: 157 },
+            { fr: "Erouvin", hb: "עירובין", p: 105 }, { fr: "Pessahim", hb: "פסחים", p: 121 },
+            { fr: "Chekalim", hb: "שקלים", p: 22 }, { fr: "Yoma", hb: "יומא", p: 88 },
+            { fr: "Soucca", hb: "סוכה", p: 56 }, { fr: "Beitsa", hb: "ביצה", p: 40 },
+            { fr: "Roch_Hachana", hb: "ראש השנה", p: 35 }, { fr: "Taanit", hb: "תענית", p: 31 },
+            { fr: "Meguila", hb: "מגילה", p: 32 }, { fr: "Moed_Katan", hb: "מועד קטן", p: 29 },
+            { fr: "Haguiga", hb: "חגיגה", p: 27 }, { fr: "Yebamot", hb: "יבמות", p: 122 },
+            { fr: "Ketoubot", hb: "כתובות", p: 112 }, { fr: "Nedarim", hb: "נדרים", p: 91 },
+            { fr: "Nazir", hb: "נזיר", p: 66 }, { fr: "Sota", hb: "סוטה", p: 49 },
+            { fr: "Guitin", hb: "גיטין", p: 90 }, { fr: "Kidouchine", hb: "קידושין", p: 82 },
+            { fr: "Baba_Kama", hb: "בבא קמא", p: 119 }, { fr: "Baba_Metsia", hb: "בבא מציעא", p: 119 },
+            { fr: "Baba_Batra", hb: "בבא בתרא", p: 176 }, { fr: "Sanhedrin", hb: "סנהדרין", p: 113 },
+            { fr: "Makot", hb: "מכות", p: 24 }, { fr: "Chvouot", hb: "שבועות", p: 49 },
+            { fr: "Avoda_Zara", hb: "עבודה זרה", p: 76 }, { fr: "Horayot", hb: "הוריות", p: 14 },
+            { fr: "Zevahim", hb: "זבחים", p: 120 }, { fr: "Menahot", hb: "מנחות", p: 110 },
+            { fr: "Houlin", hb: "חולין", p: 142 }, { fr: "Bekhorot", hb: "בכורות", p: 61 },
+            { fr: "Arakhin", hb: "ערכין", p: 34 }, { fr: "Temoura", hb: "תמורה", p: 34 },
+            { fr: "Keritout", hb: "כריתות", p: 28 }, { fr: "Meila", hb: "מעילה", p: 22 },
+            { fr: "Tamid", hb: "תמיד", p: 9 }, { fr: "Nidda", hb: "נדה", p: 73 }
+        ];
+
+        const COLORS = ["#81ecec", "#74b9ff", "#a29bfe", "#ffeaa7", "#fab1a0", "#55efc4"];
+
+        // Utilitaires localStorage
+        const saveToStorage = (key, value) => {
+            try {
+                localStorage.setItem(key, JSON.stringify(value));
+            } catch (e) {
+                console.error("Erreur sauvegarde:", e);
+                alert("⚠️ Erreur de sauvegarde");
+            }
+        };
+
+        const loadFromStorage = (key, defaultValue) => {
+            try {
+                const item = localStorage.getItem(key);
+                return item ? JSON.parse(item) : defaultValue;
+            } catch (e) {
+                return defaultValue;
+            }
+        };
+
+        // 🔧 UPLOAD VERS LE SERVEUR
+        const uploadFile = async (file, type) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const endpoint = type === 'audio' ? '/upload/audio' : '/upload/image';
+            
+            const response = await fetch(SERVER_URL + endpoint, {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Erreur upload: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            return SERVER_URL + data.url;
+        };
+
+        function App() {
+            // Chargement initial
+            const [nav, setNav] = useState(() => {
+                const saved = loadFromStorage('talmud_nav', null);
+                if (saved && saved.t) {
+                    const traite = TRAITES.find(t => t.fr === saved.t.fr);
+                    return { ...saved, t: traite || TRAITES[0] };
+                }
+                return { t: TRAITES[0], d: 2, a: "a" };
+            });
+            
+            const [sidebarWidth, setSidebarWidth] = useState(() => loadFromStorage('sidebar_width', 340));
+            const [isResizing, setIsResizing] = useState(false);
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [config, setConfig] = useState(() => loadFromStorage('talmud_config', {}));
+            const [activeZone, setActiveZone] = useState(null);
+            const [tempEditZone, setTempEditZone] = useState(null);
+            const [imageExists, setImageExists] = useState(true);
+            const [loading, setLoading] = useState(false);
+            const [loadingMessage, setLoadingMessage] = useState('');
+            const [serverOnline, setServerOnline] = useState(false);
+            
+            const [drawing, setDrawing] = useState(false);
+            const [startPos, setStartPos] = useState(null);
+            const [tempRect, setTempRect] = useState(null);
+            
+            const [dragging, setDragging] = useState(false);
+            const [resizing, setResizing] = useState(null);
+            const [dragStart, setDragStart] = useState(null);
+            
+            const [audioInfo, setAudioInfo] = useState({ playing: false, progress: 0, duration: 0, currentTime: 0 });
+
+            const audioRef = useRef(new Audio());
+            const canvasRef = useRef(null);
+            
+            const pageKey = `${nav.t.fr}_${nav.d}${nav.a}`;
+            const zones = config[pageKey] || [];
+            
+            const imagePath = `dafim/${nav.t.fr}_${nav.d}${nav.a}.jpg`;
+
+            // 🔧 VÉRIFIER SI LE SERVEUR EST EN LIGNE
+            useEffect(() => {
+                const checkServer = async () => {
+                    try {
+                        const response = await fetch(SERVER_URL + '/api/health');
+                        setServerOnline(response.ok);
+                    } catch (err) {
+                        setServerOnline(false);
+                    }
+                };
+                checkServer();
+                const interval = setInterval(checkServer, 10000);
+                return () => clearInterval(interval);
+            }, []);
+
+            // 🔧 COMPTAGE DES ZONES UNIQUES (groupes liés = 1 zone)
+            const getUniqueZoneCount = () => {
+                const groups = new Set();
+                let standaloneCount = 0;
+                
+                zones.forEach(z => {
+                    if (z.linkedGroup) {
+                        groups.add(z.linkedGroup);
+                    } else {
+                        standaloneCount++;
+                    }
+                });
+                
+                return groups.size + standaloneCount;
+            };
+
+            // Sauvegarde automatique
+            useEffect(() => {
+                saveToStorage('talmud_nav', nav);
+            }, [nav]);
+
+            useEffect(() => {
+                saveToStorage('talmud_config', config);
+            }, [config]);
+
+            useEffect(() => {
+                saveToStorage('sidebar_width', sidebarWidth);
+            }, [sidebarWidth]);
+
+            useEffect(() => {
+                const img = new Image();
+                img.onload = () => setImageExists(true);
+                img.onerror = () => setImageExists(false);
+                img.src = imagePath;
+            }, [imagePath]);
+
+            useEffect(() => {
+                audioRef.current.pause();
+                setActiveZone(null);
+                setTempEditZone(null);
+                setAudioInfo({ playing: false, progress: 0, duration: 0, currentTime: 0 });
+            }, [pageKey]);
+
+            const toggleAdmin = () => {
+                if (isAdmin) {
+                    setIsAdmin(false);
+                } else {
+                    const pwd = prompt("Mot de passe Admin :");
+                    if (pwd === "admin123") setIsAdmin(true);
+                }
+            };
+
+            // 🔧 RÉCUPÉRER LA ZONE PRINCIPALE d'un groupe lié
+            const getMainZone = (zone) => {
+                if (!zone.linkedGroup) return zone;
+                const linkedZones = zones.filter(z => z.linkedGroup === zone.linkedGroup);
+                return linkedZones.reduce((min, z) => z.id < min.id ? z : min, linkedZones[0]);
+            };
+
+            const getLinkedZones = (zone) => {
+                if (!zone.linkedGroup) return [zone];
+                return zones.filter(z => z.linkedGroup === zone.linkedGroup);
+            };
+
+            // 🔧 GESTION DU RESIZE DE LA SIDEBAR
+            const handleResizeStart = (e) => {
+                e.preventDefault();
+                setIsResizing(true);
+            };
+
+            const handleResizeMove = (e) => {
+                if (!isResizing) return;
+                const newWidth = Math.max(280, Math.min(600, window.innerWidth - e.clientX));
+                setSidebarWidth(newWidth);
+            };
+
+            const handleResizeEnd = () => {
+                setIsResizing(false);
+            };
+
+            useEffect(() => {
+                if (isResizing) {
+                    document.addEventListener('mousemove', handleResizeMove);
+                    document.addEventListener('mouseup', handleResizeEnd);
+                    return () => {
+                        document.removeEventListener('mousemove', handleResizeMove);
+                        document.removeEventListener('mouseup', handleResizeEnd);
+                    };
+                }
+            }, [isResizing]);
+
+            // DESSIN
+            const onMouseDown = (e) => {
+                if (!isAdmin) return;
+                if (e.target !== canvasRef.current.querySelector('img')) return;
+                
+                const r = canvasRef.current.getBoundingClientRect();
+                const x = Math.round((e.clientX - r.left)/10)*10;
+                const y = Math.round((e.clientY - r.top)/10)*10;
+                setStartPos({x, y}); 
+                setDrawing(true);
+            };
+
+            const onMouseMove = (e) => {
+                if (drawing) {
+                    const r = canvasRef.current.getBoundingClientRect();
+                    const x = Math.round((e.clientX - r.left)/10)*10;
+                    const y = Math.round((e.clientY - r.top)/10)*10;
+                    setTempRect({ 
+                        x: Math.min(startPos.x, x), 
+                        y: Math.min(startPos.y, y), 
+                        w: Math.max(10, Math.abs(x - startPos.x)), 
+                        h: Math.max(10, Math.abs(y - startPos.y)) 
+                    });
+                }
+            };
+
+            const onMouseUp = () => {
+                if (drawing && tempRect) {
+                    const newZone = { 
+                        id: Date.now(), 
+                        ...tempRect, 
+                        color: COLORS[zones.length % COLORS.length],
+                        audio: null,
+                        images: [], // Tableau d'images avec titres
+                        texts: [], // Tableau de textes avec titres
+                        linkedGroup: null
+                    };
+                    setConfig({...config, [pageKey]: [...zones, newZone]});
+                }
+                setDrawing(false); 
+                setTempRect(null);
+            };
+
+            // DÉPLACEMENT
+            const startDrag = (e, zone) => {
+                if (!isAdmin) return;
+                e.stopPropagation();
+                const r = canvasRef.current.getBoundingClientRect();
+                setDragging(true);
+                setActiveZone(zone);
+                setDragStart({ 
+                    x: e.clientX - r.left - zone.x, 
+                    y: e.clientY - r.top - zone.y 
+                });
+            };
+
+            const onDrag = (e) => {
+                if (!dragging || !activeZone) return;
+                const r = canvasRef.current.getBoundingClientRect();
+                const newX = Math.round((e.clientX - r.left - dragStart.x)/10)*10;
+                const newY = Math.round((e.clientY - r.top - dragStart.y)/10)*10;
+                
+                const linkedZones = getLinkedZones(activeZone);
+                const updatedZones = zones.map(z => {
+                    if (linkedZones.find(lz => lz.id === z.id)) {
+                        const deltaX = newX - activeZone.x;
+                        const deltaY = newY - activeZone.y;
+                        return { ...z, x: z.x + deltaX, y: z.y + deltaY };
+                    }
+                    return z;
+                });
+                
+                setConfig({...config, [pageKey]: updatedZones});
+                setActiveZone({...activeZone, x: newX, y: newY});
+            };
+
+            const stopDrag = () => {
+                setDragging(false);
+                setDragStart(null);
+            };
+
+            // REDIMENSIONNEMENT
+            const startResize = (e, zone, corner) => {
+                if (!isAdmin) return;
+                e.stopPropagation();
+                setResizing({ zone, corner });
+                setActiveZone(zone);
+            };
+
+            const onResize = (e) => {
+                if (!resizing) return;
+                const r = canvasRef.current.getBoundingClientRect();
+                const mouseX = Math.round((e.clientX - r.left)/10)*10;
+                const mouseY = Math.round((e.clientY - r.top)/10)*10;
+                
+                const { zone, corner } = resizing;
+                let newZone = { ...zone };
+                
+                if (corner.includes('n')) {
+                    const newY = Math.min(mouseY, zone.y + zone.h - 10);
+                    newZone.h = zone.h + (zone.y - newY);
+                    newZone.y = newY;
+                }
+                if (corner.includes('s')) {
+                    newZone.h = Math.max(10, mouseY - zone.y);
+                }
+                if (corner.includes('w')) {
+                    const newX = Math.min(mouseX, zone.x + zone.w - 10);
+                    newZone.w = zone.w + (zone.x - newX);
+                    newZone.x = newX;
+                }
+                if (corner.includes('e')) {
+                    newZone.w = Math.max(10, mouseX - zone.x);
+                }
+                
+                setConfig({...config, [pageKey]: zones.map(z => z.id === zone.id ? newZone : z)});
+                setActiveZone(newZone);
+            };
+
+            const stopResize = () => {
+                setResizing(null);
+            };
+
+            // 🔧 LIAISON (zones deviennent UNE)
+            const handleLinkZone = () => {
+                if (zones.length < 2) return;
+                const newZones = [...zones];
+                const last = newZones[newZones.length - 1];
+                const prev = newZones[newZones.length - 2];
+                
+                const groupId = prev.linkedGroup || prev.id;
+                last.linkedGroup = groupId;
+                if (!prev.linkedGroup) prev.linkedGroup = groupId;
+                
+                // Partager tous les médias
+                last.color = prev.color;
+                last.audio = prev.audio;
+                last.images = prev.images || [];
+                last.texts = prev.texts || [];
+                
+                setConfig({...config, [pageKey]: newZones});
+                alert("✓ Zones liées !");
+            };
+
+            // 🔧 DÉLIER
+            const handleUnlinkZone = (zone) => {
+                const linkedZones = getLinkedZones(zone);
+                
+                if (linkedZones.length === 2) {
+                    const newZones = zones.map(z => {
+                        if (z.linkedGroup === zone.linkedGroup) {
+                            return { ...z, linkedGroup: null };
+                        }
+                        return z;
+                    });
+                    setConfig({...config, [pageKey]: newZones});
+                } else {
+                    const newZones = zones.map(z => {
+                        if (z.id === zone.id) {
+                            return { ...z, linkedGroup: null };
+                        }
+                        return z;
+                    });
+                    setConfig({...config, [pageKey]: newZones});
+                }
+                setActiveZone(null);
+                setTempEditZone(null);
+            };
+
+            // 🔧 CLIC sur zone
+            const handleZoneClick = (z) => {
+                const mainZone = getMainZone(z);
+                
+                setActiveZone(mainZone);
+                setTempEditZone(JSON.parse(JSON.stringify(mainZone)));
+                
+                if (mainZone.audio) {
+                    audioRef.current.src = mainZone.audio;
+                    audioRef.current.play();
+                }
+            };
+
+            // 🔧 AJOUT AUDIO
+            const handleAddAudio = async () => {
+                if (!serverOnline) {
+                    alert("❌ Serveur hors ligne !");
+                    return;
+                }
+                
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'audio/*';
+                input.onchange = async (e) => {
+                    setLoading(true);
+                    setLoadingMessage('Upload audio...');
+                    try {
+                        const file = e.target.files[0];
+                        const url = await uploadFile(file, 'audio');
+                        setTempEditZone({...tempEditZone, audio: url});
+                        alert('✓ Audio uploadé !');
+                    } catch (err) {
+                        alert("❌ Erreur: " + err.message);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+                input.click();
+            };
+
+            // 🔧 AJOUT IMAGE (avec titre)
+            const handleAddImage = async () => {
+                if (!serverOnline) {
+                    alert("❌ Serveur hors ligne !");
+                    return;
+                }
+                
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    
+                    const title = prompt("Titre de l'image:");
+                    if (!title) return;
+                    
+                    setLoading(true);
+                    setLoadingMessage('Upload image...');
+                    try {
+                        const url = await uploadFile(file, 'image');
+                        const newImages = [...(tempEditZone.images || []), { title, url, id: Date.now() }];
+                        setTempEditZone({...tempEditZone, images: newImages});
+                        alert('✓ Image uploadée !');
+                    } catch (err) {
+                        alert("❌ Erreur: " + err.message);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+                input.click();
+            };
+
+            // 🔧 AJOUT TEXTE (avec titre)
+            const handleAddText = () => {
+                const title = prompt("Titre du texte:");
+                if (!title) return;
+                
+                const newTexts = [...(tempEditZone.texts || []), { title, content: "", id: Date.now() }];
+                setTempEditZone({...tempEditZone, texts: newTexts});
+            };
+
+            // 🔧 MODIFIER TITRE IMAGE
+            const handleUpdateImageTitle = (imageId, newTitle) => {
+                const newImages = tempEditZone.images.map(img => 
+                    img.id === imageId ? {...img, title: newTitle} : img
+                );
+                setTempEditZone({...tempEditZone, images: newImages});
+            };
+
+            // 🔧 MODIFIER TITRE TEXTE
+            const handleUpdateTextTitle = (textId, newTitle) => {
+                const newTexts = tempEditZone.texts.map(txt => 
+                    txt.id === textId ? {...txt, title: newTitle} : txt
+                );
+                setTempEditZone({...tempEditZone, texts: newTexts});
+            };
+
+            // 🔧 SUPPRIMER IMAGE
+            const handleRemoveImage = (imageId) => {
+                const newImages = tempEditZone.images.filter(img => img.id !== imageId);
+                setTempEditZone({...tempEditZone, images: newImages});
+            };
+
+            // 🔧 SUPPRIMER TEXTE
+            const handleRemoveText = (textId) => {
+                const newTexts = tempEditZone.texts.filter(txt => txt.id !== textId);
+                setTempEditZone({...tempEditZone, texts: newTexts});
+            };
+
+            // 🔧 MODIFIER TEXTE
+            const handleUpdateText = (textId, newContent) => {
+                const newTexts = tempEditZone.texts.map(txt => 
+                    txt.id === textId ? {...txt, content: newContent} : txt
+                );
+                setTempEditZone({...tempEditZone, texts: newTexts});
+            };
+
+            // VALIDATION
+            const handleValidateZone = () => {
+                if (!tempEditZone) return;
+                
+                const linkedZones = getLinkedZones(activeZone);
+                const updatedZones = zones.map(z => {
+                    if (linkedZones.find(lz => lz.id === z.id)) {
+                        return {
+                            ...z,
+                            audio: tempEditZone.audio,
+                            images: tempEditZone.images,
+                            texts: tempEditZone.texts
+                        };
+                    }
+                    return z;
+                });
+                
+                setConfig({...config, [pageKey]: updatedZones});
+                setActiveZone(tempEditZone);
+                alert("✓ Modifications enregistrées !");
+            };
+
+            // 🔧 AUTO-EXPORT toutes les 5 minutes
+            useEffect(() => {
+                if (!isAdmin) return;
+                
+                const autoExport = () => {
+                    const exportData = {
+                        version: "2.0",
+                        exportDate: new Date().toISOString(),
+                        config: config
+                    };
+                    
+                    const blob = new Blob([JSON.stringify(exportData, null, 2)], {type:'application/json'}); 
+                    const a = document.createElement('a'); 
+                    a.href = URL.createObjectURL(blob); 
+                    a.download = `talmud_backup_${new Date().toISOString().slice(0,16).replace(/:/g,'-')}.json`; 
+                    a.click();
+                    
+                    console.log('✓ Sauvegarde automatique effectuée');
+                };
+                
+                // Premier export après 5 minutes
+                const timer = setInterval(autoExport, 5 * 60 * 1000); // 5 minutes
+                
+                return () => clearInterval(timer);
+            }, [isAdmin, config]);
+
+            // EXPORT manuel (si besoin)
+            const handleExportJSON = () => {
+                const exportData = {
+                    version: "2.0",
+                    exportDate: new Date().toISOString(),
+                    config: config
+                };
+                
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], {type:'application/json'}); 
+                const a = document.createElement('a'); 
+                a.href = URL.createObjectURL(blob); 
+                a.download = `talmud_zones_${Date.now()}.json`; 
+                a.click();
+            };
+
+            // AUDIO
+            useEffect(() => {
+                const audio = audioRef.current;
+                const updateAudio = () => {
+                    setAudioInfo({ 
+                        playing: !audio.paused, 
+                        progress: audio.duration ? (audio.currentTime / audio.duration) * 100 : 0,
+                        currentTime: audio.currentTime,
+                        duration: audio.duration || 0
+                    });
+                };
+                
+                audio.addEventListener('timeupdate', updateAudio);
+                audio.addEventListener('play', updateAudio);
+                audio.addEventListener('pause', updateAudio);
+                audio.addEventListener('loadedmetadata', updateAudio);
+                
+                return () => {
+                    audio.removeEventListener('timeupdate', updateAudio);
+                    audio.removeEventListener('play', updateAudio);
+                    audio.removeEventListener('pause', updateAudio);
+                    audio.removeEventListener('loadedmetadata', updateAudio);
+                };
+            }, []);
+
+            const formatTime = (seconds) => {
+                if (!seconds || isNaN(seconds)) return "0:00";
+                const m = Math.floor(seconds / 60);
+                const s = Math.floor(seconds % 60);
+                return `${m}:${s.toString().padStart(2, '0')}`;
+            };
+
+            const handleProgressClick = (e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const percent = (e.clientX - rect.left) / rect.width;
+                audioRef.current.currentTime = percent * audioRef.current.duration;
+            };
+
+            useEffect(() => {
+                if (dragging) {
+                    document.addEventListener('mousemove', onDrag);
+                    document.addEventListener('mouseup', stopDrag);
+                    return () => {
+                        document.removeEventListener('mousemove', onDrag);
+                        document.removeEventListener('mouseup', stopDrag);
+                    };
+                }
+            }, [dragging, activeZone, dragStart]);
+
+            useEffect(() => {
+                if (resizing) {
+                    document.addEventListener('mousemove', onResize);
+                    document.addEventListener('mouseup', stopResize);
+                    return () => {
+                        document.removeEventListener('mousemove', onResize);
+                        document.removeEventListener('mouseup', stopResize);
+                    };
+                }
+            }, [resizing]);
+
+            return (
+                <div className="app-container">
+                    {loading && (
+                        <div className="loading-indicator">
+                            <div className="spinner">⏳</div>
+                            <div>{loadingMessage}</div>
+                        </div>
+                    )}
+                    
+                    <div className="sidebar" style={{width: sidebarWidth}}>
+                        <h1>
+                            Talmud Interactif
+                            <span className={`server-status ${serverOnline ? 'online' : 'offline'}`}>
+                                {serverOnline ? '● Online' : '● Offline'}
+                            </span>
+                        </h1>
+                        <div className="nav-section">
+                            <label>
+                                Traité
+                                {imageExists && <span className="status-badge available">✓ Image</span>}
+                                {!imageExists && <span className="status-badge missing">✗ Manquante</span>}
+                            </label>
+                            <select value={nav.t.fr} onChange={e => setNav({...nav, t: TRAITES.find(x=>x.fr===e.target.value), d: 2})}>
+                                {TRAITES.map(t => <option key={t.fr} value={t.fr}>{t.hb} - {t.fr}</option>)}
+                            </select>
+                            
+                            <label>Daf</label>
+                            <select value={nav.d} onChange={e => setNav({...nav, d: parseInt(e.target.value)})}>
+                                {Array.from({length: nav.t.p - 1}, (_, i) => i + 2).map(d => <option key={d} value={d}>{d}</option>)}
+                            </select>
+
+                            <label>Amoud</label>
+                            <select value={nav.a} onChange={e => setNav({...nav, a: e.target.value})}>
+                                <option value="a">a</option><option value="b">b</option>
+                            </select>
+
+                            {isAdmin && (
+                                <div className="admin-box">
+                                    <small>MODE ADMIN ACTIVÉ</small>
+                                    
+                                    <div className="zone-counter">
+                                        📍 {getUniqueZoneCount()} zone{getUniqueZoneCount() > 1 ? 's' : ''}
+                                    </div>
+                                    
+                                    <button onClick={handleLinkZone} style={{background:'#27ae60', color:'white'}} disabled={zones.length < 2}>
+                                        🔗 Lier à la zone précédente
+                                    </button>
+                                    
+                                    <div style={{background:'#2980b9', color:'white', padding:'12px', borderRadius:'6px', marginTop:'10px', textAlign:'center', fontSize:'12px'}}>
+                                        <div style={{fontWeight:'bold', marginBottom:'5px'}}>💾 Auto-sauvegarde activée</div>
+                                        <div style={{fontSize:'11px', opacity:0.9}}>Export automatique toutes les 5 min</div>
+                                        <button onClick={handleExportJSON} style={{background:'rgba(255,255,255,0.2)', color:'white', padding:'8px 12px', marginTop:'8px', fontSize:'11px'}}>
+                                            Exporter maintenant
+                                        </button>
+                                    </div>
+                                    
+                                    {tempEditZone && (
+                                        <div style={{marginTop:'15px', borderTop:'2px solid #555', paddingTop:'15px'}}>
+                                            <small style={{color:'#e67e22'}}>ÉDITION ZONE #{tempEditZone.id}</small>
+                                            
+                                            <div className="content-indicators">
+                                                <div className={`indicator ${tempEditZone.audio ? 'has-content' : 'no-content'}`}>
+                                                    🔊 Audio 
+                                                    <span className="indicator-count">{tempEditZone.audio ? '1' : '0'}</span>
+                                                </div>
+                                                <div className={`indicator ${(tempEditZone.images?.length > 0) ? 'has-content' : 'no-content'}`}>
+                                                    🖼️ Images
+                                                    <span className="indicator-count">{tempEditZone.images?.length || 0}</span>
+                                                </div>
+                                                <div className={`indicator ${(tempEditZone.texts?.length > 0) ? 'has-content' : 'no-content'}`}>
+                                                    📝 Textes
+                                                    <span className="indicator-count">{tempEditZone.texts?.length || 0}</span>
+                                                </div>
+                                            </div>
+                                            
+                                            <button onClick={handleAddAudio} disabled={!serverOnline}>
+                                                {tempEditZone.audio ? '🔄 Remplacer Audio' : '➕ Ajouter Audio'}
+                                            </button>
+                                            
+                                            <button onClick={handleAddImage} disabled={!serverOnline}>
+                                                ➕ Ajouter Image
+                                            </button>
+                                            
+                                            {tempEditZone.images?.length > 0 && (
+                                                <div className="media-items-list">
+                                                    {tempEditZone.images.map(img => (
+                                                        <div key={img.id} style={{marginBottom:'15px'}}>
+                                                            <div className="media-item">
+                                                                <div style={{flex:1}}>
+                                                                    <div className="media-item-title">🖼️ Image</div>
+                                                                    <input 
+                                                                        type="text" 
+                                                                        value={img.title} 
+                                                                        onChange={(e) => handleUpdateImageTitle(img.id, e.target.value)}
+                                                                        placeholder="Titre de l'image"
+                                                                        style={{marginTop:'5px', padding:'8px', fontSize:'12px'}}
+                                                                    />
+                                                                </div>
+                                                                <button className="media-item-remove" onClick={() => handleRemoveImage(img.id)}>
+                                                                    Supprimer
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            
+                                            <button onClick={handleAddText}>
+                                                ➕ Ajouter Texte
+                                            </button>
+                                            
+                                            {tempEditZone.texts?.length > 0 && (
+                                                <div className="media-items-list">
+                                                    {tempEditZone.texts.map(txt => (
+                                                        <div key={txt.id} style={{marginBottom:'15px'}}>
+                                                            <div className="media-item">
+                                                                <div style={{flex:1}}>
+                                                                    <div className="media-item-title">📝 Texte</div>
+                                                                    <input 
+                                                                        type="text" 
+                                                                        value={txt.title} 
+                                                                        onChange={(e) => handleUpdateTextTitle(txt.id, e.target.value)}
+                                                                        placeholder="Titre du texte"
+                                                                        style={{marginTop:'5px', padding:'8px', fontSize:'12px'}}
+                                                                    />
+                                                                </div>
+                                                                <button className="media-item-remove" onClick={() => handleRemoveText(txt.id)}>
+                                                                    Supprimer
+                                                                </button>
+                                                            </div>
+                                                            <textarea 
+                                                                placeholder="Contenu du texte..." 
+                                                                value={txt.content || ""} 
+                                                                onChange={e => handleUpdateText(txt.id, e.target.value)}
+                                                                style={{marginTop:'8px', minHeight:'80px'}}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            
+                                            <button className="validate-btn" onClick={handleValidateZone}>
+                                                ✓ VALIDER LES MODIFICATIONS
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        <button className="btn-admin-access" onClick={toggleAdmin}>
+                            {isAdmin ? "Quitter Admin" : "Accès Admin"}
+                        </button>
+                    </div>
+
+                    <div className="resize-divider" onMouseDown={handleResizeStart}></div>
+
+                    <div className="viewer-container">
+                        <div className={`media-panel ${(activeZone?.images?.length > 0 || activeZone?.texts?.length > 0) ? 'active' : ''}`}>
+                            <h3>Médias associés</h3>
+                            
+                            {activeZone?.images?.length > 0 && (
+                                <div className="media-section">
+                                    <h4>🖼️ Images</h4>
+                                    {activeZone.images.map(img => (
+                                        <div key={img.id} className="media-content-item">
+                                            <div className="media-content-title">{img.title}</div>
+                                            <img src={img.url} style={{width:'100%', borderRadius:'5px'}} alt={img.title} />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            {activeZone?.texts?.length > 0 && (
+                                <div className="media-section">
+                                    <h4>📝 Textes</h4>
+                                    {activeZone.texts.map(txt => (
+                                        <div key={txt.id} className="media-content-item">
+                                            <div className="media-content-title">{txt.title}</div>
+                                            <div className="media-content-text">{txt.content}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="daf-viewport">
+                            <h2 style={{color:'#2c3e50'}}>Traité {nav.t.fr}, Daf {nav.d}{nav.a}</h2>
+                            
+                            {imageExists ? (
+                                <div 
+                                    className="canvas-wrapper" 
+                                    ref={canvasRef} 
+                                    onMouseDown={onMouseDown} 
+                                    onMouseMove={onMouseMove} 
+                                    onMouseUp={onMouseUp}
+                                >
+                                    <img src={imagePath} draggable="false" style={{display:'block'}} alt="Daf" />
+                                    {zones.map(z => {
+                                        const linkedZones = getLinkedZones(z);
+                                        const mainZone = getMainZone(z);
+                                        const isLinked = linkedZones.length > 1;
+                                        const isMainZone = z.id === mainZone.id;
+                                        
+                                        const audioCount = z.audio ? 1 : 0;
+                                        const imagesCount = z.images?.length || 0;
+                                        const textsCount = z.texts?.length || 0;
+                                        
+                                        // Vérifier si cette zone fait partie du groupe sélectionné
+                                        const isSelected = activeZone && (
+                                            activeZone.id === z.id || 
+                                            (activeZone.linkedGroup && z.linkedGroup === activeZone.linkedGroup)
+                                        );
+                                        
+                                        // En mode utilisateur, masquer les bordures des zones liées pour un aspect unifié
+                                        const zoneClasses = `zone-overlay ${isSelected ? 'selected' : ''} ${isAdmin && isLinked ? 'linked' : ''}`;
+                                        const zoneStyle = {
+                                            left: z.x, 
+                                            top: z.y, 
+                                            width: z.w, 
+                                            height: z.h, 
+                                            background: z.color,
+                                            // En mode utilisateur, si zone liée : bordure transparente et opacité plus forte
+                                            ...((!isAdmin && isLinked) ? {
+                                                border: 'none',
+                                                opacity: 0.5
+                                            } : {})
+                                        };
+                                        
+                                        return (
+                                            <div 
+                                                key={z.id} 
+                                                className={zoneClasses} 
+                                                style={zoneStyle}
+                                                onClick={() => handleZoneClick(z)}
+                                                onMouseDown={(e) => startDrag(e, z)}
+                                            >
+                                                {isAdmin && isMainZone && (
+                                                    <div className="zone-badge">
+                                                        {audioCount > 0 && (
+                                                            <div className="zone-badge-item">
+                                                                🔊<span className="zone-badge-num">{audioCount}</span>
+                                                            </div>
+                                                        )}
+                                                        {imagesCount > 0 && (
+                                                            <div className="zone-badge-item">
+                                                                🖼️<span className="zone-badge-num">{imagesCount}</span>
+                                                            </div>
+                                                        )}
+                                                        {textsCount > 0 && (
+                                                            <div className="zone-badge-item">
+                                                                📝<span className="zone-badge-num">{textsCount}</span>
+                                                            </div>
+                                                        )}
+                                                        {isLinked && (
+                                                            <div className="zone-badge-item">
+                                                                🔗<span className="zone-badge-num">{linkedZones.length}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                
+                                                {isAdmin && (
+                                                    <>
+                                                        {isMainZone && (
+                                                            <div className="delete-btn" onClick={(e)=>{
+                                                                e.stopPropagation();
+                                                                const toDelete = getLinkedZones(z);
+                                                                setConfig({...config, [pageKey]: zones.filter(x => !toDelete.find(td => td.id === x.id))}); 
+                                                                setActiveZone(null);
+                                                                setTempEditZone(null);
+                                                            }}>×</div>
+                                                        )}
+                                                        
+                                                        {isLinked && (
+                                                            <div className="unlink-btn" onClick={(e)=>{
+                                                                e.stopPropagation(); 
+                                                                handleUnlinkZone(z);
+                                                            }} title="Délier cette zone">🔓</div>
+                                                        )}
+                                                        
+                                                        {isSelected && isMainZone && (
+                                                            <>
+                                                                <div className="resize-handle nw" onMouseDown={(e) => startResize(e, z, 'nw')}></div>
+                                                                <div className="resize-handle ne" onMouseDown={(e) => startResize(e, z, 'ne')}></div>
+                                                                <div className="resize-handle sw" onMouseDown={(e) => startResize(e, z, 'sw')}></div>
+                                                                <div className="resize-handle se" onMouseDown={(e) => startResize(e, z, 'se')}></div>
+                                                            </>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    {tempRect && <div style={{position:'absolute', border:'2px dashed #e67e22', left:tempRect.x, top:tempRect.y, width:tempRect.w, height:tempRect.h, pointerEvents:'none'}} />}
+                                </div>
+                            ) : (
+                                <div className="error-msg">
+                                    ⚠️ Image manquante : <code>{imagePath}</code>
+                                </div>
+                            )}
+                        </div>
+
+                        {activeZone?.audio && (
+                            <div className="audio-bar">
+                                <button className="play-btn" onClick={() => audioInfo.playing ? audioRef.current.pause() : audioRef.current.play()}>
+                                    {audioInfo.playing ? <i className="fas fa-pause"></i> : <i className="fas fa-play"></i>}
+                                </button>
+                                <div className="progress-container">
+                                    <span>{formatTime(audioInfo.currentTime)}</span>
+                                    <div className="progress-bar" onClick={handleProgressClick}>
+                                        <div className="progress-fill" style={{width: `${audioInfo.progress}%`}}></div>
+                                    </div>
+                                    <span>{formatTime(audioInfo.duration)}</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

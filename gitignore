@@ -1,0 +1,26 @@
+# Dépendances Node
+node_modules/
+
+# Fichiers uploadés (temporaires sur Render)
+uploads/
+
+# Variables d'environnement
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sauvegardes JSON (optionnel)
+talmud_backup_*.json
