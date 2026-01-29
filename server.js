@@ -1,44 +1,26 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const cors = require('cors');
+const cloudinary = require('cloudinary').v2;
+const streamifier = require('streamifier');
 
 const app = express();
 const PORT = 3000;
+
+// Configuration Cloudinary
+cloudinary.config({
+    cloud_name: 'dulsajvpb',
+    api_key: '681899794284849',
+    api_secret: 'oIummUWfggd6auwLJe-phutaPuI'
+});
 
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Créer les dossiers nécessaires
-const uploadsDir = path.join(__dirname, 'uploads');
-const audioDir = path.join(uploadsDir, 'audio');
-const imageDir = path.join(uploadsDir, 'images');
-
-[uploadsDir, audioDir, imageDir].forEach(dir => {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-});
-
-// Configuration Multer pour l'upload
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        if (file.mimetype.startsWith('audio/')) {
-            cb(null, audioDir);
-        } else if (file.mimetype.startsWith('image/')) {
-            cb(null, imageDir);
-        } else {
-            cb(new Error('Type de fichier non supporté'), null);
-        }
-    },
-    filename: (req, file, cb) => {
-        const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
-        cb(null, uniqueName);
-    }
-});
+// Configuration Multer pour upload en mémoire (pas de stockage local)
+const storage = multer.memoryStorage();
 
 const upload = multer({
     storage: storage,
@@ -55,96 +37,123 @@ const upload = multer({
     }
 });
 
+// Fonction pour uploader vers Cloudinary
+const uploadToCloudinary = (buffer, resourceType, folder) => {
+    return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+            {
+                resource_type: resourceType,
+                folder: `talmud/${folder}`,
+                transformation: resourceType === 'image' ? [
+                    { quality: 'auto', fetch_format: 'auto' }
+                ] : []
+            },
+            (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+            }
+        );
+        
+        streamifier.createReadStream(buffer).pipe(uploadStream);
+    });
+};
+
 // Routes
 
-// Upload audio
-app.post('/upload/audio', upload.single('file'), (req, res) => {
+// Upload audio vers Cloudinary
+app.post('/upload/audio', upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'Aucun fichier reçu' });
         }
         
-        const fileUrl = `/uploads/audio/${req.file.filename}`;
+        const result = await uploadToCloudinary(req.file.buffer, 'video', 'audio'); // 'video' pour audio dans Cloudinary
+        
         res.json({
             success: true,
-            url: fileUrl,
-            filename: req.file.filename,
-            size: req.file.size
+            url: result.secure_url,
+            publicId: result.public_id,
+            size: result.bytes
         });
     } catch (error) {
+        console.error('Erreur upload audio:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// Upload image
-app.post('/upload/image', upload.single('file'), (req, res) => {
+// Upload image vers Cloudinary
+app.post('/upload/image', upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'Aucun fichier reçu' });
         }
         
-        const fileUrl = `/uploads/images/${req.file.filename}`;
+        const result = await uploadToCloudinary(req.file.buffer, 'image', 'images');
+        
         res.json({
             success: true,
-            url: fileUrl,
-            filename: req.file.filename,
-            size: req.file.size
+            url: result.secure_url,
+            publicId: result.public_id,
+            size: result.bytes
         });
     } catch (error) {
+        console.error('Erreur upload image:', error);
         res.status(500).json({ error: error.message });
     }
 });
-
-// Servir les fichiers uploadés
-app.use('/uploads', express.static(uploadsDir));
 
 // Servir les fichiers HTML
 app.use(express.static(__dirname));
 
-// Lister les fichiers (pour debug/admin)
-app.get('/api/files', (req, res) => {
+// Lister les fichiers uploadés sur Cloudinary (pour debug/admin)
+app.get('/api/files', async (req, res) => {
     try {
-        const audioFiles = fs.readdirSync(audioDir).map(f => ({
-            name: f,
-            type: 'audio',
-            url: `/uploads/audio/${f}`,
-            size: fs.statSync(path.join(audioDir, f)).size
-        }));
+        const audioFiles = await cloudinary.api.resources({
+            type: 'upload',
+            prefix: 'talmud/audio',
+            resource_type: 'video',
+            max_results: 100
+        });
         
-        const imageFiles = fs.readdirSync(imageDir).map(f => ({
-            name: f,
-            type: 'image',
-            url: `/uploads/images/${f}`,
-            size: fs.statSync(path.join(imageDir, f)).size
-        }));
+        const imageFiles = await cloudinary.api.resources({
+            type: 'upload',
+            prefix: 'talmud/images',
+            max_results: 100
+        });
         
         res.json({
-            audio: audioFiles,
-            images: imageFiles,
-            total: audioFiles.length + imageFiles.length
+            audio: audioFiles.resources.map(r => ({
+                name: r.public_id,
+                type: 'audio',
+                url: r.secure_url,
+                size: r.bytes
+            })),
+            images: imageFiles.resources.map(r => ({
+                name: r.public_id,
+                type: 'image',
+                url: r.secure_url,
+                size: r.bytes
+            })),
+            total: audioFiles.resources.length + imageFiles.resources.length
         });
     } catch (error) {
+        console.error('Erreur listing:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// Supprimer un fichier
-app.delete('/api/file', (req, res) => {
+// Supprimer un fichier de Cloudinary
+app.delete('/api/file', async (req, res) => {
     try {
-        const { url } = req.body;
-        if (!url) {
-            return res.status(400).json({ error: 'URL manquante' });
+        const { publicId, resourceType } = req.body;
+        if (!publicId) {
+            return res.status(400).json({ error: 'Public ID manquant' });
         }
         
-        const filePath = path.join(__dirname, url);
-        
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            res.json({ success: true, message: 'Fichier supprimé' });
-        } else {
-            res.status(404).json({ error: 'Fichier introuvable' });
-        }
+        await cloudinary.uploader.destroy(publicId, { resource_type: resourceType || 'image' });
+        res.json({ success: true, message: 'Fichier supprimé' });
     } catch (error) {
+        console.error('Erreur suppression:', error);
         res.status(500).json({ error: error.message });
     }
 });
